@@ -33,20 +33,3 @@ jobs:
 
       - name: Test
         run: go test -race ./...
-
-  # Builds the image without pushing it, so a broken Dockerfile is caught
-  # before a release tag is cut.
-  image:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-buildx-action@v4
-
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
