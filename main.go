@@ -99,14 +99,14 @@ func newMux(auth http.Handler) *http.ServeMux {
 	return mux
 }
 
-func run(log *slog.Logger, level *slog.LevelVar) error {
+func run(ctx context.Context, log *slog.Logger, level *slog.LevelVar) error {
 	cfg, err := loadConfig(os.Getenv)
 	if err != nil {
 		return err
 	}
 	level.Set(cfg.logLevel)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	auth, err := newAuthenticator(ctx, cfg.issuer, cfg.certsURL, cfg.audiences, log)
@@ -127,7 +127,7 @@ func run(log *slog.Logger, level *slog.LevelVar) error {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
-	log.Info("listening", "addr", cfg.listenAddr, "issuer", cfg.issuer, "audiences", len(cfg.audiences), "audit_log", cfg.auditLog)
+	log.InfoContext(ctx, "listening", "addr", cfg.listenAddr, "issuer", cfg.issuer, "audiences", len(cfg.audiences), "audit_log", cfg.auditLog)
 
 	select {
 	case err := <-errCh:
@@ -135,9 +135,11 @@ func run(log *slog.Logger, level *slog.LevelVar) error {
 	case <-ctx.Done():
 	}
 
-	log.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// ctx is already cancelled here, so shutdown gets a fresh deadline that
+	// keeps ctx's values.
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
+	log.InfoContext(shutdownCtx, "shutting down")
 	return srv.Shutdown(shutdownCtx)
 }
 
@@ -148,8 +150,9 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(log)
 
-	if err := run(log, level); err != nil {
-		log.Error("fatal error", "error", err.Error())
+	ctx := context.Background()
+	if err := run(ctx, log, level); err != nil {
+		log.ErrorContext(ctx, "fatal error", "error", err.Error())
 		os.Exit(1)
 	}
 }

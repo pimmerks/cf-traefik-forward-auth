@@ -143,7 +143,7 @@ func (a *authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	id, err := a.verify(r)
 	if err != nil {
-		log.Warn("access denied", "reason", err.Error())
+		log.WarnContext(r.Context(), "access denied", "reason", err.Error())
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
