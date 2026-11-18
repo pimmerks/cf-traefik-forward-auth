@@ -47,9 +47,9 @@ type authenticator struct {
 	verifier  *oidc.IDTokenVerifier
 	audiences map[string]struct{}
 	log       *slog.Logger
-	// audit, when set, records the outcome of every request regardless of
-	// the level of log. When nil, outcomes go to log instead.
-	audit *slog.Logger
+	// audit raises successful requests from DEBUG to INFO and marks every
+	// request's entry with "audit": true.
+	audit bool
 }
 
 // newAuthenticator builds an authenticator that trusts tokens issued by issuer,
@@ -129,12 +129,11 @@ func originalURL(r *http.Request) string {
 // ServeHTTP implements the Traefik ForwardAuth contract: 2xx lets the original
 // request through, anything else is returned to the client.
 func (a *authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// With the audit log on, every outcome is recorded there: failures at
-	// WARN and successes at INFO. Without it, failures still log at WARN but
-	// successes only at DEBUG, to keep the default output quiet.
+	// Failures always log at WARN. Successes log at DEBUG to keep the default
+	// output quiet, unless the audit log is on, which raises them to INFO.
 	log, successLevel := a.log, slog.LevelDebug
-	if a.audit != nil {
-		log, successLevel = a.audit, slog.LevelInfo
+	if a.audit {
+		log, successLevel = log.With("audit", true), slog.LevelInfo
 	}
 	log = log.With(
 		"method", r.Header.Get("X-Forwarded-Method"),

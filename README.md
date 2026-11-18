@@ -57,8 +57,10 @@ marked `"audit": true`:
 {"time":"...","level":"WARN","msg":"access denied","audit":true,"method":"GET","url":"https://app.example.com/reports","client":"203.0.113.7","reason":"no Cloudflare Access token in request"}
 ```
 
-Audit entries are written regardless of `LOG_LEVEL`. The URL, method and client
-address come from the `X-Forwarded-*` headers Traefik sends.
+Audit entries go through the same logger as everything else, so `LOG_LEVEL`
+applies: at `warn` or `error` the `INFO` entries for allowed requests are not
+written. The URL, method and client address come from the `X-Forwarded-*`
+headers Traefik sends.
 
 ## Endpoints
 

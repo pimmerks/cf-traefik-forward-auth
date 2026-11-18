@@ -114,11 +114,7 @@ func run(log *slog.Logger, level *slog.LevelVar) error {
 		return err
 	}
 
-	if cfg.auditLog {
-		// A separate logger, so LOG_LEVEL cannot silence the audit trail.
-		// Entries are marked "audit": true to tell them apart.
-		auth.audit = slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("audit", true)
-	}
+	auth.audit = cfg.auditLog
 
 	srv := &http.Server{
 		Addr:              cfg.listenAddr,

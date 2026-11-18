@@ -219,7 +219,8 @@ func TestRejected(t *testing.T) {
 func auditEntries(t *testing.T, a *authenticator, mutate func(*http.Request)) (*httptest.ResponseRecorder, []map[string]any) {
 	t.Helper()
 	var buf bytes.Buffer
-	a.audit = slog.New(slog.NewJSONHandler(&buf, nil)).With("audit", true)
+	a.audit = true
+	a.log = slog.New(slog.NewJSONHandler(&buf, nil))
 	rec := doAuth(a, func(r *http.Request) {
 		r.Header.Set("X-Forwarded-Method", "GET")
 		r.Header.Set("X-Forwarded-Proto", "https")
