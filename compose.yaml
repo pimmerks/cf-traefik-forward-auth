@@ -22,8 +22,6 @@ services:
 
   cf-auth:
     image: ghcr.io/pimmerks/cf-traefik-forward-auth:latest
-    # Used instead of the published image with: docker compose up --build
-    build: .
     environment:
       CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:?set CF_ACCESS_TEAM_DOMAIN}
       CF_ACCESS_AUD: ${CF_ACCESS_AUD:?set CF_ACCESS_AUD}
