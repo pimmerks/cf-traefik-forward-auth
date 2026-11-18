@@ -1,2 +1,103 @@
 # cf-traefik-forward-auth
-Forward Auth container that checks for the Cloudflare Access JWT token
+
+A small [Traefik ForwardAuth](https://doc.traefik.io/traefik/middlewares/http/forwardauth/)
+server that only lets a request through when it carries a valid
+[Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/identity/authorization-cookie/validating-json/)
+JWT.
+
+Cloudflare Access adds a signed application token to every request it proxies to
+your origin. If your origin is reachable in any way that bypasses Cloudflare,
+those requests arrive without a valid token. This server makes Traefik reject
+them.
+
+## How it works
+
+For every request, Traefik calls this server with the original request headers.
+The server:
+
+1. Reads the token from the `Cf-Access-Jwt-Assertion` header, falling back to
+   the `CF_Authorization` cookie.
+2. Verifies the RS256 signature against your team's public keys
+   (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`). Keys are cached
+   and refetched when Cloudflare rotates them.
+3. Checks the issuer, expiry and not-before time, and that the token's audience
+   matches one of the configured application AUD tags.
+
+A valid token gets `200 OK`, and Traefik forwards the request. Anything else
+gets `401 Unauthorized`, which Traefik returns to the client. If the keys cannot
+be fetched, requests are rejected.
+
+## Configuration
+
+| Variable                | Required | Default | Description                                                                                                |
+| ----------------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `CF_ACCESS_TEAM_DOMAIN` | yes      |         | Your Zero Trust team name or domain: `myteam`, `myteam.cloudflareaccess.com` or the full `https://` URL.   |
+| `CF_ACCESS_AUD`         | yes      |         | Application Audience (AUD) tag from the Access application's settings. Comma-separated for several apps.   |
+| `LISTEN_ADDR`           | no       | `:8080` | Address to listen on.                                                                                      |
+| `LOG_LEVEL`             | no       | `info`  | `debug`, `info`, `warn` or `error`. Denied requests log at `warn`, allowed requests at `debug`.            |
+
+With several AUD tags, a token for any of the listed applications is accepted
+on every route that uses the middleware. Run one instance per application if
+you need them kept apart.
+
+## Endpoints
+
+| Path       | Description                                                |
+| ---------- | ---------------------------------------------------------- |
+| `/healthz` | Liveness check, returns `204`.                             |
+| any other  | The auth check. Point the ForwardAuth `address` here.      |
+
+On success the response carries these headers, which Traefik can pass on to
+your backend via `authResponseHeaders`:
+
+| Header               | Value                                              |
+| -------------------- | -------------------------------------------------- |
+| `X-Auth-Email`       | The user's email address (user logins).            |
+| `X-Auth-User`        | The user's Access ID, the token's `sub` (user logins). |
+| `X-Auth-Common-Name` | The service token's client ID (service tokens).    |
+
+Traefik removes any header listed in `authResponseHeaders` that the auth
+response does not set, so clients cannot spoof these.
+
+## Example with Docker Compose
+
+```yaml
+services:
+  traefik:
+    image: traefik:v3
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  cf-auth:
+    build: .
+    environment:
+      CF_ACCESS_TEAM_DOMAIN: myteam
+      CF_ACCESS_AUD: 4714c1358e65fe4b408ad6d432a5f878f08194bdb4752441fd56faefa9b2b6f2
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.cf-access.forwardauth.address=http://cf-auth:8080/
+      - traefik.http.middlewares.cf-access.forwardauth.authResponseHeaders=X-Auth-Email,X-Auth-User,X-Auth-Common-Name
+
+  whoami:
+    image: traefik/whoami
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.whoami.rule=Host(`app.example.com`)
+      - traefik.http.routers.whoami.middlewares=cf-access
+```
+
+## Development
+
+```bash
+go test ./...
+```
+
+```bash
+CF_ACCESS_TEAM_DOMAIN=myteam CF_ACCESS_AUD=<aud-tag> go run .
+```
