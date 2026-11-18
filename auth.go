@@ -47,6 +47,9 @@ type authenticator struct {
 	verifier  *oidc.IDTokenVerifier
 	audiences map[string]struct{}
 	log       *slog.Logger
+	// audit raises successful requests from DEBUG to INFO and marks every
+	// request's entry with "name": "audit".
+	audit bool
 }
 
 // newAuthenticator builds an authenticator that trusts tokens issued by issuer,
@@ -113,20 +116,34 @@ func (a *authenticator) audienceAllowed(tokenAud []string) bool {
 	return false
 }
 
+// originalURL rebuilds the URL of the request Traefik is asking about from
+// the X-Forwarded-* headers it sends.
+func originalURL(r *http.Request) string {
+	url := r.Header.Get("X-Forwarded-Host") + r.Header.Get("X-Forwarded-Uri")
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		url = proto + "://" + url
+	}
+	return url
+}
+
 // ServeHTTP implements the Traefik ForwardAuth contract: 2xx lets the original
 // request through, anything else is returned to the client.
 func (a *authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Traefik describes the original request in X-Forwarded-* headers.
-	reqLog := a.log.With(
+	// Failures always log at WARN. Successes log at DEBUG to keep the default
+	// output quiet, unless the audit log is on, which raises them to INFO.
+	log, successLevel := a.log, slog.LevelDebug
+	if a.audit {
+		log, successLevel = log.With("name", "audit"), slog.LevelInfo
+	}
+	log = log.With(
 		"method", r.Header.Get("X-Forwarded-Method"),
-		"host", r.Header.Get("X-Forwarded-Host"),
-		"uri", r.Header.Get("X-Forwarded-Uri"),
+		"url", originalURL(r),
 		"client", r.Header.Get("X-Forwarded-For"),
 	)
 
 	id, err := a.verify(r)
 	if err != nil {
-		reqLog.Warn("access denied", "reason", err.Error())
+		log.WarnContext(r.Context(), "access denied", "reason", err.Error())
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -143,6 +160,7 @@ func (a *authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set(name, value)
 		}
 	}
-	reqLog.Debug("access granted", "email", id.Email, "sub", id.Subject, "common_name", id.CommonName)
+	log.Log(r.Context(), successLevel, "access granted",
+		"user_id", id.Subject, "email", id.Email, "common_name", id.CommonName)
 	w.WriteHeader(http.StatusOK)
 }

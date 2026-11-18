@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -214,6 +215,98 @@ func TestRejected(t *testing.T) {
 	}
 }
 
+// auditEntries runs one request with the audit log on and returns what was logged.
+func auditEntries(t *testing.T, a *authenticator, mutate func(*http.Request)) (*httptest.ResponseRecorder, []map[string]any) {
+	t.Helper()
+	var buf bytes.Buffer
+	a.audit = true
+	a.log = slog.New(slog.NewJSONHandler(&buf, nil))
+	rec := doAuth(a, func(r *http.Request) {
+		r.Header.Set("X-Forwarded-Method", "GET")
+		r.Header.Set("X-Forwarded-Proto", "https")
+		r.Header.Set("X-Forwarded-Uri", "/reports?year=2026")
+		r.Header.Set("X-Forwarded-For", "203.0.113.7")
+		if mutate != nil {
+			mutate(r)
+		}
+	})
+	var entries []map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal(line, &entry); err != nil {
+			t.Fatalf("audit line is not JSON: %s", line)
+		}
+		entries = append(entries, entry)
+	}
+	return rec, entries
+}
+
+func TestAuditLogSuccess(t *testing.T) {
+	f := newFakeAccess(t)
+	rec, entries := auditEntries(t, f.authenticator(testAud), withHeader(f.token(nil)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d audit entries, want 1: %v", len(entries), entries)
+	}
+	want := map[string]any{
+		"level":   "INFO",
+		"msg":     "access granted",
+		"name":    "audit",
+		"user_id": "7335d417-61da-459d-899c-0a01c76a2f94",
+		"email":   "user@example.com",
+		"url":     "https://app.example.com/reports?year=2026",
+		"method":  "GET",
+		"client":  "203.0.113.7",
+	}
+	for k, v := range want {
+		if entries[0][k] != v {
+			t.Errorf("audit %s = %v, want %v", k, entries[0][k], v)
+		}
+	}
+}
+
+func TestAuditLogFailure(t *testing.T) {
+	f := newFakeAccess(t)
+	rec, entries := auditEntries(t, f.authenticator(testAud), nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d audit entries, want 1: %v", len(entries), entries)
+	}
+	want := map[string]any{
+		"level":  "WARN",
+		"msg":    "access denied",
+		"name":   "audit",
+		"reason": errNoToken.Error(),
+		"url":    "https://app.example.com/reports?year=2026",
+	}
+	for k, v := range want {
+		if entries[0][k] != v {
+			t.Errorf("audit %s = %v, want %v", k, entries[0][k], v)
+		}
+	}
+}
+
+// Without the audit log, a successful request must not log at INFO.
+func TestNoAuditLogByDefault(t *testing.T) {
+	f := newFakeAccess(t)
+	var buf bytes.Buffer
+	a := f.authenticator(testAud)
+	a.log = slog.New(slog.NewJSONHandler(&buf, nil))
+	if rec := doAuth(a, withHeader(f.token(nil))); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("unexpected log output: %s", buf.String())
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	f := newFakeAccess(t)
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -260,9 +353,22 @@ func TestLoadConfig(t *testing.T) {
 	if len(cfg.audiences) != 2 || cfg.audiences[0] != "aud-one" || cfg.audiences[1] != "aud-two" {
 		t.Errorf("audiences = %v", cfg.audiences)
 	}
+	if cfg.auditLog {
+		t.Error("auditLog should default to false")
+	}
 	if cfg.listenAddr != ":8080" || cfg.logLevel != slog.LevelDebug {
 		t.Errorf("listenAddr = %q, logLevel = %v", cfg.listenAddr, cfg.logLevel)
 	}
+
+	env["AUDIT_LOG"] = "true"
+	if cfg, err := loadConfig(func(k string) string { return env[k] }); err != nil || !cfg.auditLog {
+		t.Errorf("AUDIT_LOG=true: auditLog = %v, err = %v", cfg.auditLog, err)
+	}
+	env["AUDIT_LOG"] = "maybe"
+	if _, err := loadConfig(func(k string) string { return env[k] }); err == nil {
+		t.Error("expected an error for AUDIT_LOG=maybe")
+	}
+	delete(env, "AUDIT_LOG")
 
 	delete(env, "CF_ACCESS_AUD")
 	if _, err := loadConfig(func(k string) string { return env[k] }); err == nil {

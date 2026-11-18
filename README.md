@@ -35,10 +35,32 @@ be fetched, requests are rejected.
 | `CF_ACCESS_AUD`         | yes      |         | Application Audience (AUD) tag from the Access application's settings. Comma-separated for several apps.   |
 | `LISTEN_ADDR`           | no       | `:8080` | Address to listen on.                                                                                      |
 | `LOG_LEVEL`             | no       | `info`  | `debug`, `info`, `warn` or `error`. Denied requests log at `warn`, allowed requests at `debug`.            |
+| `AUDIT_LOG`             | no       | `false` | `true` writes an audit entry for every request. See [Audit log](#audit-log).                               |
 
 With several AUD tags, a token for any of the listed applications is accepted
 on every route that uses the middleware. Run one instance per application if
 you need them kept apart.
+
+## Audit log
+
+With `AUDIT_LOG=true`, every auth request writes one JSON line to stdout,
+marked `"name": "audit"`:
+
+- **Allowed** requests log at `INFO` with the user ID (`user_id`, the token's
+  `sub`), `email`, `common_name` (service tokens), the original `url`, `method`
+  and `client` address.
+- **Denied** requests log at `WARN` with the `reason`, `url`, `method` and
+  `client` address.
+
+```json
+{"time":"...","level":"INFO","msg":"access granted","name":"audit","method":"GET","url":"https://app.example.com/reports","client":"203.0.113.7","user_id":"7335d417-...","email":"user@example.com","common_name":""}
+{"time":"...","level":"WARN","msg":"access denied","name":"audit","method":"GET","url":"https://app.example.com/reports","client":"203.0.113.7","reason":"no Cloudflare Access token in request"}
+```
+
+Audit entries go through the same logger as everything else, so `LOG_LEVEL`
+applies: at `warn` or `error` the `INFO` entries for allowed requests are not
+written. The URL, method and client address come from the `X-Forwarded-*`
+headers Traefik sends.
 
 ## Endpoints
 
