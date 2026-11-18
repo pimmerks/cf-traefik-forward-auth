@@ -92,6 +92,12 @@ services:
       - traefik.http.routers.whoami.middlewares=cf-access
 ```
 
+## Container image
+
+Pushing a version tag such as `v1.2.3` (or publishing a GitHub release that
+creates one) builds a `linux/amd64` and `linux/arm64` image and pushes it to
+`ghcr.io/pimmerks/cf-traefik-forward-auth`, tagged `1.2.3`, `1.2` and `latest`.
+
 ## Development
 
 ```bash
