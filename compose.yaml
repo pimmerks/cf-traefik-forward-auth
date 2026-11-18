@@ -1,0 +1,40 @@
+# Example: Traefik with the Cloudflare Access check in front of a demo service.
+#
+# Set these in a .env file next to this one, or in your shell:
+#
+#   CF_ACCESS_TEAM_DOMAIN=myteam
+#   CF_ACCESS_AUD=<application audience (AUD) tag>
+#   APP_HOST=app.example.com
+#
+# Then run: docker compose up
+
+services:
+  traefik:
+    image: traefik:v3
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  cf-auth:
+    image: ghcr.io/pimmerks/cf-traefik-forward-auth:latest
+    environment:
+      CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:?set CF_ACCESS_TEAM_DOMAIN}
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD:?set CF_ACCESS_AUD}
+    labels:
+      - traefik.enable=true
+      # Defines the middleware; attach it to every router that must be protected.
+      - traefik.http.middlewares.cf-access.forwardauth.address=http://cf-auth:8080/
+      - traefik.http.middlewares.cf-access.forwardauth.authResponseHeaders=X-Auth-Email,X-Auth-User,X-Auth-Common-Name
+
+  # Demo backend that echoes the request, including the X-Auth-* headers.
+  whoami:
+    image: traefik/whoami
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.whoami.rule=Host(`${APP_HOST:?set APP_HOST}`)
+      - traefik.http.routers.whoami.middlewares=cf-access

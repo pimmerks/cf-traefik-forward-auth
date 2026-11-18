@@ -61,36 +61,24 @@ response does not set, so clients cannot spoof these.
 
 ## Example with Docker Compose
 
-```yaml
-services:
-  traefik:
-    image: traefik:v3
-    command:
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --entrypoints.web.address=:80
-    ports:
-      - "80:80"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+[`compose.yaml`](compose.yaml) runs Traefik with this server as a ForwardAuth
+middleware in front of a demo `whoami` service. Create a `.env` file next to it:
 
-  cf-auth:
-    build: .
-    environment:
-      CF_ACCESS_TEAM_DOMAIN: myteam
-      CF_ACCESS_AUD: 4714c1358e65fe4b408ad6d432a5f878f08194bdb4752441fd56faefa9b2b6f2
-    labels:
-      - traefik.enable=true
-      - traefik.http.middlewares.cf-access.forwardauth.address=http://cf-auth:8080/
-      - traefik.http.middlewares.cf-access.forwardauth.authResponseHeaders=X-Auth-Email,X-Auth-User,X-Auth-Common-Name
-
-  whoami:
-    image: traefik/whoami
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.whoami.rule=Host(`app.example.com`)
-      - traefik.http.routers.whoami.middlewares=cf-access
+```bash
+CF_ACCESS_TEAM_DOMAIN=myteam
+CF_ACCESS_AUD=<aud-tag>
+APP_HOST=app.example.com
 ```
+
+Then start it:
+
+```bash
+docker compose up
+```
+
+The part that matters for your own setup is the middleware definition on the
+`cf-auth` service and the `middlewares=cf-access` label on each router you want
+protected.
 
 ## Container image
 
