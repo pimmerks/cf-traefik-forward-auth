@@ -90,12 +90,12 @@ func newMux(auth http.Handler) *http.ServeMux {
 	return mux
 }
 
-func run() error {
+func run(log *slog.Logger, level *slog.LevelVar) error {
 	cfg, err := loadConfig(os.Getenv)
 	if err != nil {
 		return err
 	}
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.logLevel}))
+	level.Set(cfg.logLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -131,8 +131,14 @@ func run() error {
 }
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+	// The logger exists before the config is loaded so that startup errors
+	// are logged in the same format; the level is adjusted once it is known.
+	level := new(slog.LevelVar)
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	slog.SetDefault(log)
+
+	if err := run(log, level); err != nil {
+		log.Error("fatal error", "error", err.Error())
 		os.Exit(1)
 	}
 }
