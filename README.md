@@ -44,7 +44,7 @@ you need them kept apart.
 ## Audit log
 
 With `AUDIT_LOG=true`, every auth request writes one JSON line to stdout,
-marked `"audit": true`:
+marked `"name": "audit"`:
 
 - **Allowed** requests log at `INFO` with the user ID (`user_id`, the token's
   `sub`), `email`, `common_name` (service tokens), the original `url`, `method`
@@ -53,8 +53,8 @@ marked `"audit": true`:
   `client` address.
 
 ```json
-{"time":"...","level":"INFO","msg":"access granted","audit":true,"method":"GET","url":"https://app.example.com/reports","client":"203.0.113.7","user_id":"7335d417-...","email":"user@example.com","common_name":""}
-{"time":"...","level":"WARN","msg":"access denied","audit":true,"method":"GET","url":"https://app.example.com/reports","client":"203.0.113.7","reason":"no Cloudflare Access token in request"}
+{"time":"...","level":"INFO","msg":"access granted","name":"audit","method":"GET","url":"https://app.example.com/reports","client":"203.0.113.7","user_id":"7335d417-...","email":"user@example.com","common_name":""}
+{"time":"...","level":"WARN","msg":"access denied","name":"audit","method":"GET","url":"https://app.example.com/reports","client":"203.0.113.7","reason":"no Cloudflare Access token in request"}
 ```
 
 Audit entries go through the same logger as everything else, so `LOG_LEVEL`

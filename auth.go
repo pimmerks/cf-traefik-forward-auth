@@ -48,7 +48,7 @@ type authenticator struct {
 	audiences map[string]struct{}
 	log       *slog.Logger
 	// audit raises successful requests from DEBUG to INFO and marks every
-	// request's entry with "audit": true.
+	// request's entry with "name": "audit".
 	audit bool
 }
 
@@ -133,7 +133,7 @@ func (a *authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// output quiet, unless the audit log is on, which raises them to INFO.
 	log, successLevel := a.log, slog.LevelDebug
 	if a.audit {
-		log, successLevel = log.With("audit", true), slog.LevelInfo
+		log, successLevel = log.With("name", "audit"), slog.LevelInfo
 	}
 	log = log.With(
 		"method", r.Header.Get("X-Forwarded-Method"),

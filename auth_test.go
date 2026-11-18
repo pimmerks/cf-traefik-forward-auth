@@ -256,7 +256,7 @@ func TestAuditLogSuccess(t *testing.T) {
 	want := map[string]any{
 		"level":   "INFO",
 		"msg":     "access granted",
-		"audit":   true,
+		"name":    "audit",
 		"user_id": "7335d417-61da-459d-899c-0a01c76a2f94",
 		"email":   "user@example.com",
 		"url":     "https://app.example.com/reports?year=2026",
@@ -282,7 +282,7 @@ func TestAuditLogFailure(t *testing.T) {
 	want := map[string]any{
 		"level":  "WARN",
 		"msg":    "access denied",
-		"audit":  true,
+		"name":   "audit",
 		"reason": errNoToken.Error(),
 		"url":    "https://app.example.com/reports?year=2026",
 	}
