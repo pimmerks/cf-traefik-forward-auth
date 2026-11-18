@@ -77,9 +77,15 @@ your backend via `authResponseHeaders`:
 | `X-Auth-Email`       | The user's email address (user logins).            |
 | `X-Auth-User`        | The user's Access ID, the token's `sub` (user logins). |
 | `X-Auth-Common-Name` | The service token's client ID (service tokens).    |
+| `X-Real-IP`          | The visitor's address, taken from Cloudflare's `CF-Connecting-IP`. |
 
 Traefik removes any header listed in `authResponseHeaders` that the auth
 response does not set, so clients cannot spoof these.
+
+`X-Real-IP` is only as trustworthy as the path the request took: a visitor who
+holds a valid token and can reach Traefik without going through Cloudflare can
+send any `CF-Connecting-IP`. Restrict your origin to Cloudflare's addresses if
+you rely on it.
 
 ## Example with Docker Compose
 

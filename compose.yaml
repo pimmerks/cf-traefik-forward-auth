@@ -29,7 +29,7 @@ services:
       - traefik.enable=true
       # Defines the middleware; attach it to every router that must be protected.
       - traefik.http.middlewares.cf-access.forwardauth.address=http://cf-auth:8080/
-      - traefik.http.middlewares.cf-access.forwardauth.authResponseHeaders=X-Auth-Email,X-Auth-User,X-Auth-Common-Name
+      - traefik.http.middlewares.cf-access.forwardauth.authResponseHeaders=X-Auth-Email,X-Auth-User,X-Auth-Common-Name,X-Real-IP
 
   # Demo backend that echoes the request, including the X-Auth-* headers.
   whoami:

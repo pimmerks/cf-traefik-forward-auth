@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -21,6 +22,11 @@ const (
 	headerEmail      = "X-Auth-Email"
 	headerUser       = "X-Auth-User"
 	headerCommonName = "X-Auth-Common-Name"
+
+	// Cloudflare puts the visitor's address in Cf-Connecting-Ip; it is passed
+	// on as X-Real-Ip, the header backends conventionally read.
+	headerConnectingIP = "Cf-Connecting-Ip"
+	headerRealIP       = "X-Real-Ip"
 )
 
 var (
@@ -126,6 +132,16 @@ func originalURL(r *http.Request) string {
 	return url
 }
 
+// connectingIP returns the visitor's address as reported by Cloudflare, or ""
+// when the header is missing or is not an IP address.
+func connectingIP(r *http.Request) string {
+	addr, err := netip.ParseAddr(strings.TrimSpace(r.Header.Get(headerConnectingIP)))
+	if err != nil {
+		return ""
+	}
+	return addr.String()
+}
+
 // ServeHTTP implements the Traefik ForwardAuth contract: 2xx lets the original
 // request through, anything else is returned to the client.
 func (a *authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -155,6 +171,7 @@ func (a *authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		headerEmail:      id.Email,
 		headerUser:       id.Subject,
 		headerCommonName: id.CommonName,
+		headerRealIP:     connectingIP(r),
 	} {
 		if value != "" {
 			w.Header().Set(name, value)
