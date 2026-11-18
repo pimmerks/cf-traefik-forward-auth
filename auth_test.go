@@ -134,6 +134,41 @@ func TestValidTokenInHeader(t *testing.T) {
 	}
 }
 
+func TestRealIP(t *testing.T) {
+	f := newFakeAccess(t)
+	a := f.authenticator(testAud)
+	token := f.token(nil)
+
+	for in, want := range map[string]string{
+		"203.0.113.7":           "203.0.113.7",
+		" 2001:db8::1 ":         "2001:db8::1",
+		"":                      "",
+		"not-an-ip":             "",
+		"203.0.113.7, 10.0.0.1": "",
+	} {
+		rec := doAuth(a, func(r *http.Request) {
+			r.Header.Set(accessJWTHeader, token)
+			// A client-supplied X-Real-IP must never be echoed back.
+			r.Header.Set(headerRealIP, "198.51.100.99")
+			if in != "" {
+				r.Header.Set(headerConnectingIP, in)
+			}
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		if got := rec.Header().Get(headerRealIP); got != want {
+			t.Errorf("Cf-Connecting-Ip %q: %s = %q, want %q", in, headerRealIP, got, want)
+		}
+	}
+
+	// Rejected requests get no X-Real-IP.
+	rec := doAuth(a, func(r *http.Request) { r.Header.Set(headerConnectingIP, "203.0.113.7") })
+	if got := rec.Header().Get(headerRealIP); rec.Code != http.StatusUnauthorized || got != "" {
+		t.Errorf("rejected request: status = %d, %s = %q", rec.Code, headerRealIP, got)
+	}
+}
+
 func TestValidTokenInCookie(t *testing.T) {
 	f := newFakeAccess(t)
 	token := f.token(nil)
