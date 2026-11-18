@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -22,6 +23,7 @@ type config struct {
 	audiences  []string
 	listenAddr string
 	logLevel   slog.Level
+	auditLog   bool
 }
 
 // issuerFromTeamDomain accepts "myteam", "myteam.cloudflareaccess.com" or
@@ -71,6 +73,13 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if v := getenv("LISTEN_ADDR"); v != "" {
 		cfg.listenAddr = v
 	}
+	if v := getenv("AUDIT_LOG"); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return cfg, fmt.Errorf("AUDIT_LOG: %q is not true or false", v)
+		}
+		cfg.auditLog = enabled
+	}
 	if v := getenv("LOG_LEVEL"); v != "" {
 		if err := cfg.logLevel.UnmarshalText([]byte(v)); err != nil {
 			return cfg, fmt.Errorf("LOG_LEVEL: %w", err)
@@ -105,6 +114,12 @@ func run(log *slog.Logger, level *slog.LevelVar) error {
 		return err
 	}
 
+	if cfg.auditLog {
+		// A separate logger, so LOG_LEVEL cannot silence the audit trail.
+		// Entries are marked "audit": true to tell them apart.
+		auth.audit = slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("audit", true)
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.listenAddr,
 		Handler:           newMux(auth),
@@ -116,7 +131,7 @@ func run(log *slog.Logger, level *slog.LevelVar) error {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
-	log.Info("listening", "addr", cfg.listenAddr, "issuer", cfg.issuer, "audiences", len(cfg.audiences))
+	log.Info("listening", "addr", cfg.listenAddr, "issuer", cfg.issuer, "audiences", len(cfg.audiences), "audit_log", cfg.auditLog)
 
 	select {
 	case err := <-errCh:

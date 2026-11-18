@@ -47,6 +47,9 @@ type authenticator struct {
 	verifier  *oidc.IDTokenVerifier
 	audiences map[string]struct{}
 	log       *slog.Logger
+	// audit, when set, records the outcome of every request regardless of
+	// the level of log. When nil, outcomes go to log instead.
+	audit *slog.Logger
 }
 
 // newAuthenticator builds an authenticator that trusts tokens issued by issuer,
@@ -113,20 +116,35 @@ func (a *authenticator) audienceAllowed(tokenAud []string) bool {
 	return false
 }
 
+// originalURL rebuilds the URL of the request Traefik is asking about from
+// the X-Forwarded-* headers it sends.
+func originalURL(r *http.Request) string {
+	url := r.Header.Get("X-Forwarded-Host") + r.Header.Get("X-Forwarded-Uri")
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		url = proto + "://" + url
+	}
+	return url
+}
+
 // ServeHTTP implements the Traefik ForwardAuth contract: 2xx lets the original
 // request through, anything else is returned to the client.
 func (a *authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Traefik describes the original request in X-Forwarded-* headers.
-	reqLog := a.log.With(
+	// With the audit log on, every outcome is recorded there: failures at
+	// WARN and successes at INFO. Without it, failures still log at WARN but
+	// successes only at DEBUG, to keep the default output quiet.
+	log, successLevel := a.log, slog.LevelDebug
+	if a.audit != nil {
+		log, successLevel = a.audit, slog.LevelInfo
+	}
+	log = log.With(
 		"method", r.Header.Get("X-Forwarded-Method"),
-		"host", r.Header.Get("X-Forwarded-Host"),
-		"uri", r.Header.Get("X-Forwarded-Uri"),
+		"url", originalURL(r),
 		"client", r.Header.Get("X-Forwarded-For"),
 	)
 
 	id, err := a.verify(r)
 	if err != nil {
-		reqLog.Warn("access denied", "reason", err.Error())
+		log.Warn("access denied", "reason", err.Error())
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -143,6 +161,7 @@ func (a *authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set(name, value)
 		}
 	}
-	reqLog.Debug("access granted", "email", id.Email, "sub", id.Subject, "common_name", id.CommonName)
+	log.Log(r.Context(), successLevel, "access granted",
+		"user_id", id.Subject, "email", id.Email, "common_name", id.CommonName)
 	w.WriteHeader(http.StatusOK)
 }
