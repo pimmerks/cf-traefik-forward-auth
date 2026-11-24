@@ -18,12 +18,13 @@ import (
 )
 
 type config struct {
-	issuer     string
-	certsURL   string
-	audiences  []string
-	listenAddr string
-	logLevel   slog.Level
-	auditLog   bool
+	issuer      string
+	certsURL    string
+	audiences   []string
+	listenAddr  string
+	metricsAddr string // empty disables the metrics listener
+	logLevel    slog.Level
+	auditLog    bool
 }
 
 // issuerFromTeamDomain accepts "myteam", "myteam.cloudflareaccess.com" or
@@ -56,7 +57,7 @@ func splitList(s string) []string {
 }
 
 func loadConfig(getenv func(string) string) (config, error) {
-	cfg := config{listenAddr: ":8080", logLevel: slog.LevelInfo}
+	cfg := config{listenAddr: ":8080", metricsAddr: ":9090", logLevel: slog.LevelInfo}
 
 	issuer, err := issuerFromTeamDomain(getenv("CF_ACCESS_TEAM_DOMAIN"))
 	if err != nil {
@@ -72,6 +73,13 @@ func loadConfig(getenv func(string) string) (config, error) {
 
 	if v := getenv("LISTEN_ADDR"); v != "" {
 		cfg.listenAddr = v
+	}
+	switch v := getenv("METRICS_ADDR"); v {
+	case "":
+	case "off":
+		cfg.metricsAddr = ""
+	default:
+		cfg.metricsAddr = v
 	}
 	if v := getenv("AUDIT_LOG"); v != "" {
 		enabled, err := strconv.ParseBool(v)
@@ -116,22 +124,22 @@ func run(ctx context.Context, log *slog.Logger, level *slog.LevelVar) error {
 
 	auth.audit = cfg.auditLog
 
-	srv := &http.Server{
-		Addr:              cfg.listenAddr,
-		Handler:           newMux(auth),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       90 * time.Second,
+	servers := []*http.Server{newServer(cfg.listenAddr, newMux(auth))}
+	// Metrics get their own port so that they are not reachable through
+	// whatever routes Traefik sends to the auth port.
+	if cfg.metricsAddr != "" {
+		servers = append(servers, newServer(cfg.metricsAddr, newMetricsMux(auth.metrics)))
 	}
 
-	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
-	log.InfoContext(ctx, "listening", "addr", cfg.listenAddr, "issuer", cfg.issuer, "audiences", len(cfg.audiences), "audit_log", cfg.auditLog)
+	errCh := make(chan error, len(servers))
+	for _, srv := range servers {
+		go func() { errCh <- srv.ListenAndServe() }()
+	}
+	log.InfoContext(ctx, "listening", "addr", cfg.listenAddr, "metrics_addr", cfg.metricsAddr, "issuer", cfg.issuer, "audiences", len(cfg.audiences), "audit_log", cfg.auditLog)
 
+	var runErr error
 	select {
-	case err := <-errCh:
-		return err
+	case runErr = <-errCh:
 	case <-ctx.Done():
 	}
 
@@ -140,7 +148,23 @@ func run(ctx context.Context, log *slog.Logger, level *slog.LevelVar) error {
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	log.InfoContext(shutdownCtx, "shutting down")
-	return srv.Shutdown(shutdownCtx)
+	for _, srv := range servers {
+		if err := srv.Shutdown(shutdownCtx); err != nil && runErr == nil {
+			runErr = err
+		}
+	}
+	return runErr
+}
+
+func newServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       90 * time.Second,
+	}
 }
 
 func main() {
