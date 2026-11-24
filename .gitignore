@@ -32,3 +32,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Binary written by `go build` in the repo root
+/cf-traefik-forward-auth

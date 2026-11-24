@@ -30,6 +30,9 @@ services:
       # Defines the middleware; attach it to every router that must be protected.
       - traefik.http.middlewares.cf-access.forwardauth.address=http://cf-auth:8080/
       - traefik.http.middlewares.cf-access.forwardauth.authResponseHeaders=X-Auth-Email,X-Auth-User,X-Auth-Common-Name
+      # The image also exposes the metrics port, 9090; pin Traefik to the
+      # auth port so it never routes traffic to the metrics.
+      - traefik.http.services.cf-auth.loadbalancer.server.port=8080
 
   # Demo backend that echoes the request, including the X-Auth-* headers.
   whoami:

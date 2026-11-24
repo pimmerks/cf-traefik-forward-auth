@@ -11,5 +11,6 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /cf-traefik-forward-auth /cf-traefik-forward-auth
-EXPOSE 8080
+# 8080 serves the auth check, 9090 the Prometheus metrics.
+EXPOSE 8080 9090
 ENTRYPOINT ["/cf-traefik-forward-auth"]

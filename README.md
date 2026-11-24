@@ -34,6 +34,7 @@ be fetched, requests are rejected.
 | `CF_ACCESS_TEAM_DOMAIN` | yes      |         | Your Zero Trust team name or domain: `myteam`, `myteam.cloudflareaccess.com` or the full `https://` URL.   |
 | `CF_ACCESS_AUD`         | yes      |         | Application Audience (AUD) tag from the Access application's settings. Comma-separated for several apps.   |
 | `LISTEN_ADDR`           | no       | `:8080` | Address to listen on.                                                                                      |
+| `METRICS_ADDR`          | no       | `:9090` | Address of the Prometheus metrics listener, or `off` to disable it. See [Metrics](#metrics).               |
 | `LOG_LEVEL`             | no       | `info`  | `debug`, `info`, `warn` or `error`. Denied requests log at `warn`, allowed requests at `debug`.            |
 | `AUDIT_LOG`             | no       | `false` | `true` writes an audit entry for every request. See [Audit log](#audit-log).                               |
 
@@ -62,12 +63,35 @@ applies: at `warn` or `error` the `INFO` entries for allowed requests are not
 written. The URL, method and client address come from the `X-Forwarded-*`
 headers Traefik sends.
 
+## Metrics
+
+Prometheus metrics are served at `/metrics` on a separate port, `:9090` by
+default, so they are not reachable through the auth port that Traefik calls.
+Do not publish that port outside the network your Prometheus scrapes from.
+
+| Metric                                      | Labels             | Description                                                           |
+| ------------------------------------------- | ------------------ | --------------------------------------------------------------------- |
+| `cf_forward_auth_requests_total`            | `result`, `reason` | Auth requests. `result` is `granted` or `denied`; see reasons below.  |
+| `cf_forward_auth_request_duration_seconds`  | `result`           | Histogram of the time taken to answer, including any key fetch.       |
+| `cf_forward_auth_key_fetches_total`         | `code`             | Fetches of the signing keys, by HTTP status or `error` for no response. |
+
+Denied requests carry one of these `reason` values: `no_token`, `bad_audience`,
+`expired` or `invalid` (bad signature, wrong issuer, malformed token, and
+anything else). Granted requests have an empty `reason`. The standard Go
+runtime (`go_*`) and process (`process_*`) metrics are included too.
+
+A rise in `cf_forward_auth_key_fetches_total{code!="200"}` means Cloudflare's
+certs endpoint is unreachable, which shows up to users as every request being
+denied.
+
 ## Endpoints
 
 | Path       | Description                                                |
 | ---------- | ---------------------------------------------------------- |
 | `/healthz` | Liveness check, returns `204`.                             |
 | any other  | The auth check. Point the ForwardAuth `address` here.      |
+
+`/metrics` is on the metrics port, not this one.
 
 On success the response carries these headers, which Traefik can pass on to
 your backend via `authResponseHeaders`:

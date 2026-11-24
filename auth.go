@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 )
@@ -49,7 +50,8 @@ type authenticator struct {
 	log       *slog.Logger
 	// audit raises successful requests from DEBUG to INFO and marks every
 	// request's entry with "name": "audit".
-	audit bool
+	audit   bool
+	metrics *metrics
 }
 
 // newAuthenticator builds an authenticator that trusts tokens issued by issuer,
@@ -64,14 +66,16 @@ func newAuthenticator(ctx context.Context, issuer, certsURL string, audiences []
 	}
 	// The remote key set caches keys and refetches when it sees an unknown
 	// key ID, which covers Cloudflare's signing key rotation. ctx bounds the
-	// lifetime of those background fetches, not of a single request.
-	keySet := oidc.NewRemoteKeySet(ctx, certsURL)
+	// lifetime of those background fetches, not of a single request. The
+	// client it carries counts the fetches.
+	m := newMetrics()
+	keySet := oidc.NewRemoteKeySet(oidc.ClientContext(ctx, m.keyFetchClient()), certsURL)
 	verifier := oidc.NewVerifier(issuer, keySet, &oidc.Config{
 		// Audience is checked in verify, since we accept any of several.
 		SkipClientIDCheck:    true,
 		SupportedSigningAlgs: []string{oidc.RS256},
 	})
-	return &authenticator{verifier: verifier, audiences: set, log: log}, nil
+	return &authenticator{verifier: verifier, audiences: set, log: log, metrics: m}, nil
 }
 
 // tokenFromRequest extracts the Access JWT from the header, falling back to
@@ -141,7 +145,9 @@ func (a *authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"client", r.Header.Get("X-Forwarded-For"),
 	)
 
+	start := time.Now()
 	id, err := a.verify(r)
+	a.observe(err, time.Since(start))
 	if err != nil {
 		log.WarnContext(r.Context(), "access denied", "reason", err.Error())
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -163,4 +169,14 @@ func (a *authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Log(r.Context(), successLevel, "access granted",
 		"user_id", id.Subject, "email", id.Email, "common_name", id.CommonName)
 	w.WriteHeader(http.StatusOK)
+}
+
+// observe records the outcome and duration of one auth request.
+func (a *authenticator) observe(err error, took time.Duration) {
+	result, reason := "granted", reasonNone
+	if err != nil {
+		result, reason = "denied", denyReason(err)
+	}
+	a.metrics.requests.WithLabelValues(result, reason).Inc()
+	a.metrics.duration.WithLabelValues(result).Observe(took.Seconds())
 }
